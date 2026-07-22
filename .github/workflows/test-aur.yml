@@ -65,12 +65,42 @@ jobs:
           echo "=== After ==="
           grep -E '^(pkgver|pkgrel|sha256sums_)' PKGBUILD
 
-      - name: Install makepkg
-        run: sudo apt-get update && sudo apt-get install -y --no-install-recommends pacman
-
       - name: Generate .SRCINFO
         working-directory: aur-repo
-        run: makepkg --printsrcinfo > .SRCINFO
+        run: |
+          VERSION="${{ inputs.version }}"
+          SHA_X64='${{ steps.checksums.outputs.x64 }}'
+          SHA_ARM64='${{ steps.checksums.outputs.arm64 }}'
+          TAB=$(printf '\t')
+          cat > .SRCINFO << SRCINFO
+          pkgbase = tcode-bin
+          ${TAB}pkgdesc = A native desktop app for the coding agents you already use.
+          ${TAB}pkgver = ${VERSION}
+          ${TAB}pkgrel = 1
+          ${TAB}url = https://github.com/Tryanks/tcode
+          ${TAB}arch = x86_64
+          ${TAB}arch = aarch64
+          ${TAB}license = MIT
+          ${TAB}depends = alsa-lib
+          ${TAB}depends = fontconfig
+          ${TAB}depends = libxkbcommon
+          ${TAB}depends = libxkbcommon-x11
+          ${TAB}depends = libxcb
+          ${TAB}depends = libx11
+          ${TAB}depends = mesa
+          ${TAB}depends = vulkan-icd-loader
+          ${TAB}depends = wayland
+          ${TAB}optdepends = amdvlk: AMD GPU Vulkan support
+          ${TAB}optdepends = nvidia-utils: NVIDIA GPU Vulkan support
+          ${TAB}optdepends = vulkan-intel: Intel GPU Vulkan support
+          ${TAB}optdepends = vulkan-radeon: AMD Radeon Vulkan support
+          ${TAB}source_x86_64 = tcode-${VERSION}-linux-x64.tar.gz::https://github.com/Tryanks/tcode/releases/download/v${VERSION}/tcode-${VERSION}-linux-x64.tar.gz
+          ${TAB}sha256sums_x86_64 = ${SHA_X64}
+          ${TAB}source_aarch64 = tcode-${VERSION}-linux-arm64.tar.gz::https://github.com/Tryanks/tcode/releases/download/v${VERSION}/tcode-${VERSION}-linux-arm64.tar.gz
+          ${TAB}sha256sums_aarch64 = ${SHA_ARM64}
+
+          pkgname = tcode-bin
+          SRCINFO
 
       - name: Show diff
         working-directory: aur-repo
