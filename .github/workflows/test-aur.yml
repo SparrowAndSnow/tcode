@@ -16,6 +16,8 @@ jobs:
   test-aur:
     runs-on: ubuntu-24.04
     container: archlinux:base-devel
+    env:
+      GIT_SSH_COMMAND: ssh -i ~/.ssh/aur -o StrictHostKeyChecking=accept-new
     steps:
       - name: Initialize pacman and install dependencies
         run: |
@@ -43,8 +45,6 @@ jobs:
           mkdir -p ~/.ssh
           echo "${{ secrets.AUR_SSH_PRIVATE_KEY }}" > ~/.ssh/aur
           chmod 600 ~/.ssh/aur
-          ssh-keyscan -H aur.archlinux.org >> ~/.ssh/known_hosts
-          echo "IdentityFile ~/.ssh/aur" >> ~/.ssh/config
 
       - name: Clone AUR repository
         run: git clone aur@aur.archlinux.org:tcode-bin.git aur-repo
