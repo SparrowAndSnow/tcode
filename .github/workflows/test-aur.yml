@@ -1,0 +1,110 @@
+name: Test AUR publish
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: '要测试的版本号，如 0.1.28'
+        required: true
+        type: string
+      dry_run:
+        description: 'Dry run — 只显示 diff，不推送到 AUR'
+        type: boolean
+        default: true
+
+jobs:
+  test-aur:
+    runs-on: ubuntu-24.04
+    container: archlinux:base-devel
+    steps:
+      - name: Initialize pacman and install dependencies
+        run: |
+          pacman-key --init && pacman-key --populate
+          pacman -Syu --noconfirm --needed git openssh
+
+      - name: Download Linux tarballs from upstream release
+        run: |
+          VERSION="${{ inputs.version }}"
+          BASE="https://github.com/Tryanks/tcode/releases/download/v${VERSION}"
+          curl -sL -o tcode-linux-x64.tar.gz "${BASE}/tcode-${VERSION}-linux-x64.tar.gz"
+          curl -sL -o tcode-linux-arm64.tar.gz "${BASE}/tcode-${VERSION}-linux-arm64.tar.gz"
+          ls -lh tcode-*.tar.gz
+
+      - name: Calculate SHA256 checksums
+        id: checksums
+        run: |
+          sha256_x64=$(sha256sum tcode-linux-x64.tar.gz | cut -d' ' -f1)
+          sha256_arm64=$(sha256sum tcode-linux-arm64.tar.gz | cut -d' ' -f1)
+          echo "x64=${sha256_x64}" >> "$GITHUB_OUTPUT"
+          echo "arm64=${sha256_arm64}" >> "$GITHUB_OUTPUT"
+
+      - name: Install SSH key for AUR
+        run: |
+          mkdir -p ~/.ssh
+          echo "${{ secrets.AUR_SSH_PRIVATE_KEY }}" > ~/.ssh/aur
+          chmod 600 ~/.ssh/aur
+          cat >> ~/.ssh/config << 'EOF'
+          Host aur.archlinux.org
+            IdentityFile ~/.ssh/aur
+            StrictHostKeyChecking accept-new
+          EOF
+
+      - name: Clone AUR repository
+        run: git clone aur@aur.archlinux.org:tcode-bin.git aur-repo
+
+      - name: Update PKGBUILD
+        working-directory: aur-repo
+        run: |
+          echo "=== Before ==="
+          grep -E '^(pkgver|pkgrel|sha256sums_)' PKGBUILD
+
+          sed -i "s/^pkgver=.*/pkgver=${{ inputs.version }}/" PKGBUILD
+          sed -i "s/^sha256sums_x86_64=('.*')/sha256sums_x86_64=('${{ steps.checksums.outputs.x64 }}')/" PKGBUILD
+          sed -i "s/^sha256sums_aarch64=('.*')/sha256sums_aarch64=('${{ steps.checksums.outputs.arm64 }}')/" PKGBUILD
+          sed -i "s/^pkgrel=.*/pkgrel=1/" PKGBUILD
+
+          echo "=== After ==="
+          grep -E '^(pkgver|pkgrel|sha256sums_)' PKGBUILD
+
+      - name: Generate .SRCINFO
+        working-directory: aur-repo
+        run: |
+          useradd -m builder
+          chown -R builder:builder .
+          runuser -u builder -- makepkg --printsrcinfo > .SRCINFO
+
+      - name: Show diff
+        working-directory: aur-repo
+        run: |
+          echo "=== PKGBUILD diff ==="
+          git diff PKGBUILD || true
+          echo ""
+          echo "=== .SRCINFO ==="
+          cat .SRCINFO
+
+      - name: Commit and push to AUR
+        if: inputs.dry_run == false
+        working-directory: aur-repo
+        run: |
+          if git diff --quiet; then
+            echo "No changes. AUR package is already up to date."
+            exit 0
+          fi
+          git add PKGBUILD .SRCINFO
+          git commit -m "upstream v${{ inputs.version }}"
+          git push origin master
+          echo "::notice::Published tcode-bin v${{ inputs.version }} to AUR"
+
+      - name: Summary
+        run: |
+          echo "=========================================="
+          echo "  Test complete"
+          echo "  Version: ${{ inputs.version }}"
+          echo "  SHA256 x86_64:  ${{ steps.checksums.outputs.x64 }}"
+          echo "  SHA256 aarch64: ${{ steps.checksums.outputs.arm64 }}"
+          if [ "${{ inputs.dry_run }}" == "true" ]; then
+            echo "  Mode: DRY RUN (not pushed to AUR)"
+          else
+            echo "  Mode: PUBLISHED to AUR"
+          fi
+          echo "=========================================="
